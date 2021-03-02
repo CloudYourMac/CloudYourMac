@@ -1,0 +1,137 @@
+- hosts:
+  - all
+  any_errors_fatal: true
+  gather_facts: true
+  # become: true
+  # pre_tasks:
+  #   - name: Install python for Ansible
+  #     raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal)
+  #     changed_when: False
+  #   - setup: # aka gather_facts
+  tasks:
+    - name: Find all of the files inside /boot/loader/entries directory
+      find:
+        paths: "/boot/loader/entries/"
+        patterns: "*.conf"
+      register: bootentries
+
+    - name: Make sure ipv6.disable not present in boot entries
+      replace:
+        path: "{{ item.path }}"
+        regexp: "ipv6\\.disable=1"
+        replace: ''
+      with_items: "{{ bootentries.files }}"
+      register: updatebootentries
+
+    # - name: Reboot machine
+    #   shell: sleep 5 && reboot
+    #   async: 1
+    #   poll: 0
+    #   # serial: 2
+    #   become: yes
+    #   when: updatebootentries.changed
+    
+    # - name: Wait for machine to reboot after boot entry update
+    #   wait_for_connection:
+    #     connect_timeout: 20
+    #     sleep: 5
+    #     delay: 5
+    #     timeout: 600
+    #   when: updatebootentries.changed
+
+    - name: Copy MacOS Enabler Hooks
+      ansible.builtin.copy:
+        dest: /usr/libexec/vdsm/hooks/before_vm_start/
+        src: ../../3-oVirt-MacOS-Enabler/Hooks/{{ item }}
+        mode: 0755
+      with_items:
+        - 51_enable_macos
+
+    - name: Make sure /etc/cloudyourmac folder is present
+      ansible.builtin.file:
+        path: /etc/cloudyourmac
+        state: directory
+
+    - name: Check if OpenCore image exists
+      ansible.builtin.stat:
+        path: /etc/cloudyourmac/OpenCore.img
+      register: currentOpenCoreImage
+    
+    - name: backup current OpenCore image
+      ansible.builtin.copy:
+        src: /etc/cloudyourmac/OpenCore.img
+        dest: "/etc/cloudyourmac/OpenCore-{{ ansible_date_time.iso8601_basic_short }}.img"
+        remote_src: yes
+      when: currentOpenCoreImage.stat.exists
+
+    - name: Unmount opencore image if mounted
+      shell: umount /tmp/opencore
+      ignore_errors: yes 
+
+    - name: Make sure current image doesn't exist
+      ansible.builtin.file:
+        path: /etc/cloudyourmac/OpenCore.img
+        state: absent
+
+    - name: Create blank 64MB OpenCore image
+      shell: dd if=/dev/zero of=/etc/cloudyourmac/OpenCore.img count=64 bs=1M
+
+    - name: Unmount all images
+      shell: losetup -D
+    
+    - name: Mount Opencore image
+      shell: losetup -f /etc/cloudyourmac/OpenCore.img
+
+    - name: Check disk name
+      shell: losetup | grep "/etc/cloudyourmac/OpenCore.img" | cut -d' ' -f 1
+      register: opencore_mountpoint
+
+    - name: Create gpt disk format
+      shell: "parted -s {{ opencore_mountpoint.stdout_lines | last }} mklabel gpt"
+
+    - name: Create primary partition
+      shell: "parted -s {{ opencore_mountpoint.stdout_lines | last }} mkpart OpenCore fat32 2048s 100%"
+    
+    - name: Set partiton type as efi
+      shell: "parted -s {{ opencore_mountpoint.stdout_lines | last }} set 1 esp on"
+
+    - name: Refresh partitions
+      shell: partprobe
+
+    - name: Format Opencore ESP parition
+      shell: "mkfs.fat {{ opencore_mountpoint.stdout_lines | last }}p1"
+
+    - name: Ensure mountpoint is present
+      ansible.builtin.file:
+        path: /tmp/opencore
+        state: directory
+    
+    - name: Mount Opencore parition
+      shell: "mount {{ opencore_mountpoint.stdout_lines | last }}p1 /tmp/opencore"
+
+    - name: Copy OpenCore files
+      copy:
+        src: ../../3-oVirt-MacOS-Enabler/OpenCore/EFI
+        dest: /tmp/opencore/
+    
+    - name: Unmount Opencore image
+      shell: umount /tmp/opencore
+    
+    - name: Extract smbios 
+      shell: |
+        SYS_VENDOR=$(cat /sys/devices/virtual/dmi/id/sys_vendor | sed 's/,/,,/g')
+        PRODUCT_NAME=$(cat /sys/devices/virtual/dmi/id/product_name | sed 's/,/,,/g')
+        PRODUCT_SERIAL=$(cat /sys/devices/virtual/dmi/id/product_serial | sed 's/,/,,/g')
+        PRODUCT_UUID=$(cat /sys/devices/virtual/dmi/id/product_uuid | sed 's/,/,,/g')
+        PRODUCT_FAMILY=$(cat /sys/devices/virtual/dmi/id/product_family | sed 's/,/,,/g')
+
+        BOARD_VENDOR=$(cat /sys/devices/virtual/dmi/id/board_vendor | sed 's/,/,,/g')
+        BOARD_NAME=$(cat /sys/devices/virtual/dmi/id/board_name | sed 's/,/,,/g')
+        BOARD_SERIAL=$(cat /sys/devices/virtual/dmi/id/board_serial | sed 's/,/,,/g')
+        BOARD_VERSION=$(cat /sys/devices/virtual/dmi/id/board_version | sed 's/,/,,/g')
+
+        echo "type=1,manufacturer=$SYS_VENDOR,product=$PRODUCT_NAME,serial=$PRODUCT_SERIAL,uuid=$PRODUCT_UUID,family=$PRODUCT_FAMILY" > /etc/cloudyourmac/smbiosType1
+        echo "type=2,manufacturer=$BOARD_VENDOR,product=$BOARD_NAME,serial=$BOARD_SERIAL,version=$BOARD_VERSION" > /etc/cloudyourmac/smbiosType2
+
+      
+

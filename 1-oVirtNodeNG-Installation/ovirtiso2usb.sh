@@ -18,6 +18,7 @@ LABEL=$(sed -n -e 's/^.*LABEL=//p' /Volumes/OVIRTUSB/EFI/BOOT/grub.cfg | tail -1
 echo Replacing current LABEL $LABEL
 
 sed -i ".bak" "s/$LABEL/OVIRTUSB/g" /Volumes/OVIRTUSB/EFI/BOOT/grub.cfg
+sed -i "" "s/quiet/quiet initcall_blacklist=dmi_id_init/g" /Volumes/OVIRTUSB/EFI/BOOT/grub.cfg
 sed -i "" "s/set timeout=60/set timeout=-1/g" /Volumes/OVIRTUSB/EFI/BOOT/grub.cfg
 sed -i "" "/### BEGIN \/etc\/grub.d\/10_linux ###/r macpro-ks-grub.cfg" /Volumes/OVIRTUSB/EFI/BOOT/grub.cfg
 

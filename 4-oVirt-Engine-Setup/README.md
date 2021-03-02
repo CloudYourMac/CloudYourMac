@@ -1,0 +1,1 @@
+`engine-config -s "attach_host_gpu=^(true|false)$;enable_macos=^(true|false)$" && systemctl restart ovirt-engine`

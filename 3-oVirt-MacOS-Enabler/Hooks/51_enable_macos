@@ -1,0 +1,88 @@
+#!/usr/bin/python3
+
+from __future__ import absolute_import
+
+import os
+import sys
+import hooking
+import traceback
+import json
+
+'''
+enable_macos usage
+===================
+
+https://github.com/CloudYourMac/CloudYourMac
+
+enable_macos does whatever is needed to be able to boot MacOS VMs on oVirt / KVM
+Currently it does the following
+
+1. Sets correct CPU features
+2. Adds a usb keyboard
+3. Attaches /etc/cloudyourmac/OpenCore.img boot image
+
+'''
+
+
+def addQemuNamespace(domXML):
+    domain = domXML.getElementsByTagName('domain')[0]
+    domain.setAttribute('xmlns:qemu', 'http://libvirt.org/schemas/domain/qemu/1.0')
+
+
+def addQemuCmdLines(domXML, cmds):
+    domain = domXML.getElementsByTagName('domain')[0]
+    qemuCommandLineTags = domain.getElementsByTagName('qemu:commandline')
+
+    qemuCommandLineTag = None
+
+    if not qemuCommandLineTags:
+        qemuCommandLineTag = domXML.createElement('qemu:commandline')
+    else:
+        qemuCommandLineTag = qemuCommandLineTags[0]
+
+    for cmd in cmds:
+        qemuArgElement = domXML.createElement('qemu:arg')
+        qemuArgElement.setAttribute('value', cmd)
+        qemuCommandLineTag.appendChild(qemuArgElement)
+
+    domain.appendChild(qemuCommandLineTag)
+
+
+def readExtractedSmbios(smbiosType):
+    try:
+        file = open("/etc/cloudyourmac/smbiosType" + smbiosType)
+        data = file.read()
+        file.close()
+        return data.strip()
+    except:
+        sys.stderr.write(traceback.format_exc())
+        return "INVALID : " + traceback.format_exc()
+
+
+
+if 'enable_macos' in os.environ:
+    try:
+        enable_macos = os.environ['enable_macos']
+
+        if enable_macos.lower() in ['true', '1']:
+
+            domxml = hooking.read_domxml()
+
+            addQemuNamespace(domxml)
+
+            cmds = [
+                    "-smbios", readExtractedSmbios("1"),
+                    "-smbios", readExtractedSmbios("2"),
+                    "-device", "ich9-usb-uhci1,id=uhci",
+                    "-device", "usb-kbd,bus=uhci.0",
+                    "-device", "usb-tablet,bus=uhci.0",
+                    "-cpu", "host,kvm=on,vendor=GenuineIntel,+kvm_pv_unhalt,+kvm_pv_eoi,+hypervisor,+invtsc",
+                    "-drive", "read-only=on,if=virtio,format=raw,file=/etc/cloudyourmac/OpenCore.img"
+                ]
+
+            addQemuCmdLines(domxml, cmds)
+
+            hooking.write_domxml(domxml)
+    except:
+        sys.stderr.write('enable_macos: [unexpected error]: %s\n' % traceback.format_exc())
+        sys.exit(2)
