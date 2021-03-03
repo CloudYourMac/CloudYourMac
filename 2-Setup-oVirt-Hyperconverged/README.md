@@ -15,3 +15,29 @@ To make it work for us
 gluster_infra_lvm: diskPartition
 ```
 4. You must click `Save` on top before clicking `Deploy`
+
+
+
+# Engine Configuration
+
+`/etc/ovirt-engine/osinfo.conf.d/01-macos.properties`
+
+```
+# macOS
+
+os.macos.id.value = 20000
+os.macos.name.value = macOS Catalina
+os.macos.derivedFrom.value = other
+os.macos.description.value = Apple macOS
+os.macos.family.value = macOS
+os.macos.cpu.hotunplugSupport.value = false
+os.macos.devices.display.protocols.value = vnc/vga,vnc/qxl
+os.macos.devices.usb.controller.value = piix3-uhci,q35/ehci
+os.macos.devices.diskInterfaces.value = i440fx/IDE, VirtIO
+os.macos.devices.network.value =  e1000, pv, pciPassthrough
+
+os.macosBigSur.id.value = 20001
+os.macosBigSur.name.value = macOS Big Sur
+os.macosBigSur.derivedFrom.value = macos
+os.macosBigSur.devices.usb.controller.value = piix3-uhci,q35/qemu-xhci
+```

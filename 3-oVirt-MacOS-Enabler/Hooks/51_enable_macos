@@ -73,9 +73,7 @@ if 'enable_macos' in os.environ:
             cmds = [
                     "-smbios", readExtractedSmbios("1"),
                     "-smbios", readExtractedSmbios("2"),
-                    "-device", "ich9-usb-uhci1,id=uhci",
-                    "-device", "usb-kbd,bus=uhci.0",
-                    "-device", "usb-tablet,bus=uhci.0",
+                    "-device", "usb-kbd",
                     "-cpu", "host,kvm=on,vendor=GenuineIntel,+kvm_pv_unhalt,+kvm_pv_eoi,+hypervisor,+invtsc",
                     "-drive", "read-only=on,if=virtio,format=raw,file=/etc/cloudyourmac/OpenCore.img"
                 ]
