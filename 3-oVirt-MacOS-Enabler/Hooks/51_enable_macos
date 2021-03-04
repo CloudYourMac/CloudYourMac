@@ -68,6 +68,16 @@ if 'enable_macos' in os.environ:
 
             domxml = hooking.read_domxml()
 
+            interfaces = domxml.getElementsByTagName('interface')
+
+            if interfaces:
+                interface = interfaces[0]
+                models = interface.getElementsByTagName('model')
+                if models:
+                    model = models[0]
+                    if model.getAttribute('type') == 'e1000':
+                        model.setAttribute('type', 'e1000e')
+
             addQemuNamespace(domxml)
 
             cmds = [
