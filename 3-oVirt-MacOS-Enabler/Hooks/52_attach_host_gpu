@@ -1,0 +1,141 @@
+#!/usr/bin/python3
+
+from __future__ import absolute_import
+
+import os
+import sys
+import hooking
+import traceback
+import json
+import imp
+
+from pathlib import Path
+
+'''
+attach_host_gpu usage
+===================
+
+This hook looks for os environ 'attach_host_gpu' and attaches
+host pci gpus as hostdevs to libvirt domain xml if the value is 'true'.
+
+For eg: attach_host_gpu='true'
+'''
+
+
+def injectHostDevice(domXML, bus, slot, function, vbiosPath, targetBus, targetSlot, targetFunction):
+
+    domain = domXML.getElementsByTagName('domain')[0]
+
+    devices = domain.getElementsByTagName('devices')[0]
+
+    deviceAddresses = devices.getElementsByTagName('address')
+
+    # <address bus="0x00" domain="0x0000" function="0x1" slot="0x02" type="pci"/
+
+    for deviceAddress in deviceAddresses:
+        if deviceAddress.getAttribute('bus') == targetBus and deviceAddress.getAttribute('domain') == '0x0000' and deviceAddress.getAttribute('slot') == targetSlot and deviceAddress.getAttribute('type') == 'pci' :
+            deviceAddress.setAttribute('slot', '0x0F')
+
+    hostDev = domXML.createElement('hostdev')
+    hostDev.setAttribute('mode', 'subsystem')
+    hostDev.setAttribute('type', 'pci')
+    hostDev.setAttribute('managed', 'yes')
+
+    driver = domXML.createElement('driver')
+    driver.setAttribute('name', 'vfio')
+
+    source = domXML.createElement('source')
+
+    sourceAddress = domXML.createElement('address')
+    sourceAddress.setAttribute('domain', '0x0000')
+    sourceAddress.setAttribute('bus', bus)
+    sourceAddress.setAttribute('slot', slot)
+    sourceAddress.setAttribute('function', function)
+
+    source.appendChild(sourceAddress)
+    hostDev.appendChild(source)
+    hostDev.appendChild(driver)
+
+    if targetBus:
+
+        targetAddress = domXML.createElement('address')
+        targetAddress.setAttribute('type', 'pci')
+        targetAddress.setAttribute('domain', '0x0000')
+        targetAddress.setAttribute('bus', targetBus)
+        targetAddress.setAttribute('slot', targetSlot) 
+        targetAddress.setAttribute('function', targetFunction)
+        hostDev.appendChild(targetAddress)
+    
+    if vbiosPath:
+
+        romTag = domXML.createElement('rom')
+        romTag.setAttribute('bar', 'on')
+        romTag.setAttribute('file', vbiosPath)
+        hostDev.appendChild(romTag)
+
+    devices.appendChild(hostDev)
+
+def addQemuCmdLines(domXML, cmds):
+    domain = domXML.getElementsByTagName('domain')[0]
+    qemuCommandLineTags = domain.getElementsByTagName('qemu:commandline')
+
+    qemuCommandLineTag = None
+
+    if not qemuCommandLineTags:
+        qemuCommandLineTag = domXML.createElement('qemu:commandline')
+    else:
+        qemuCommandLineTag = qemuCommandLineTags[0]
+
+    for cmd in cmds:
+        qemuArgElement = domXML.createElement('qemu:arg')
+        qemuArgElement.setAttribute('value', cmd)
+        qemuCommandLineTag.appendChild(qemuArgElement)
+
+    domain.appendChild(qemuCommandLineTag)
+
+
+def injectHostGpus(domXML):
+
+    hostProduct = Path('/sys/devices/virtual/dmi/id/product_name').read_text().strip()
+
+    if hostProduct == 'Macmini8,1':
+        # GPU
+        injectHostDevice(domXML, '0x00', '0x02', '0x0', '', '0x00', '0x02', '0x0')
+        cmdLines = [
+            "-set", "device.hostdev0.x-igd-opregion=on"
+        ]
+        addQemuCmdLines(domXML, cmdLines)
+
+        # USB controller
+        injectHostDevice(domXML, '0x00', '0x14', '0x0', '', '0x00', '0x14', '0x0')
+
+    elif hostProduct == 'MacPro6,1':
+        # GPUA
+        injectHostDevice(domXML, '0x02', '0x00', '0x0', '/etc/cloudyourmac/D700-1-vbios.rom', '', '', '')
+        injectHostDevice(domXML, '0x02', '0x00', '0x1', '', '', '', '')
+
+        # GPUB
+        injectHostDevice(domXML, '0x06', '0x00', '0x0', '/etc/cloudyourmac/D700-2-vbios.rom', '', '', '')
+        injectHostDevice(domXML, '0x06', '0x00', '0x1', '', '', '', '')
+
+        # USB Controller
+        injectHostDevice(domXML, '0x12', '0x00', '0x0', '', '0x12', '0x01', '0x0')
+
+    
+
+if 'attach_host_gpu' in os.environ:
+    try:
+        domxml = hooking.read_domxml()
+
+        attach_host_gpu = os.environ['attach_host_gpu']
+
+        if attach_host_gpu.lower() in ['true', '1']:
+
+            injectHostGpus(domxml)
+
+            hooking.write_domxml(domxml)
+
+    except:
+        sys.stderr.write('attach_host_gpu: [unexpected error]: %s\n'
+                         % traceback.format_exc())
+        sys.exit(2)

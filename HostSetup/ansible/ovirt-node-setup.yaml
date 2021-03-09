@@ -8,6 +8,19 @@
   #     raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal)
   #     changed_when: False
   #   - setup: # aka gather_facts
+  vars:
+    kernel_cmdline:
+      Macmini8,1: 
+        - intel_iommu=on
+        - kvm.ignore_msrs=1
+        - kvm.report_ignored_msrs=0
+      MacPro6,1:
+        - intel_iommu=on
+        - kvm.ignore_msrs=1
+        - kvm.report_ignored_msrs=0
+        - vfio_iommu_type1.allow_unsafe_interrupts=1
+        - kvm_intel.enable_apicv=0
+
   tasks:
     - name: Find all of the files inside /boot/loader/entries directory
       find:
@@ -22,6 +35,8 @@
         replace: ''
       with_items: "{{ bootentries.files }}"
       register: updatebootentries
+
+    ### Implement kernel command line
 
     # - name: Reboot machine
     #   shell: sleep 5 && reboot
@@ -46,11 +61,18 @@
         mode: 0755
       with_items:
         - 51_enable_macos
+        - 52_attach_host_gpu
 
     - name: Make sure /etc/cloudyourmac folder is present
       ansible.builtin.file:
         path: /etc/cloudyourmac
         state: directory
+    
+    - name: Copy Host specific files
+      copy:
+        src: "../../3-oVirt-MacOS-Enabler/HostSpecificFiles/{{ ansible_product_name }}/"
+        dest: /etc/cloudyourmac/
+
 
     - name: Check if OpenCore image exists
       ansible.builtin.stat:
@@ -114,6 +136,11 @@
         src: ../../3-oVirt-MacOS-Enabler/OpenCore/EFI
         dest: /tmp/opencore/
     
+    - name: Copy Host specific config.plist
+      copy:
+        src: "../../3-oVirt-MacOS-Enabler/OpenCore/HostSpecificConfig/config-{{ ansible_product_name }}.plist"
+        dest: /tmp/opencore/EFI/OC/config.plist
+
     - name: Unmount Opencore image
       shell: umount /tmp/opencore
     
@@ -132,6 +159,27 @@
 
         echo "type=1,manufacturer=$SYS_VENDOR,product=$PRODUCT_NAME,serial=$PRODUCT_SERIAL,uuid=$PRODUCT_UUID,family=$PRODUCT_FAMILY" > /etc/cloudyourmac/smbiosType1
         echo "type=2,manufacturer=$BOARD_VENDOR,product=$BOARD_NAME,serial=$BOARD_SERIAL,version=$BOARD_VERSION" > /etc/cloudyourmac/smbiosType2
+
+    - name : Check if vfio backup exists
+      stat:
+        path: "/lib/modules/{{ ansible_kernel }}/vfiobak"
+      register: vfiobackup
+
+    - name: Backup existing vfio modules
+      shell: "mv /lib/modules/{{ ansible_kernel }}/kernel/drivers/vfio /lib/modules/{{ ansible_kernel }}/vfiobak" 
+      when: not vfiobackup.stat.exists
+
+    - name: Copy vfio module with IGD extensions
+      copy:
+        src: "../../3-oVirt-MacOS-Enabler/VfioKernelModule/{{ ansible_kernel }}/"
+        dest: "/lib/modules/{{ ansible_kernel }}/kernel/drivers/"
+      register: modules_update
+
+    - name: Run depmod
+      shell: depmod
+      when: modules_update.changed
+
+
 
       
 
